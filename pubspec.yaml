@@ -1,0 +1,28 @@
+name: ble_acr1555u_sdk
+description: >
+  Flutter plugin (Android) per l'integrazione del reader BLE+NFC USR/ACS ACR1555U:
+  scoperta/connessione BLE, comandi CCID (IccPowerOn/XfrBlock/Escape/GetSlotStatus)
+  incapsulati nel frame proprietario BLE, e helper PC/SC (Get UID, Read/Write Binary)
+  per la lettura dei tag ISO15693/ST25 usati da g2misuratori.
+version: 0.1.0
+homepage: https://github.com/ohdonpiano/g2misuratori
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.3.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.ohdonpiano.ble_acr1555u_sdk
+        pluginClass: BleAcr1555uSdkPlugin
