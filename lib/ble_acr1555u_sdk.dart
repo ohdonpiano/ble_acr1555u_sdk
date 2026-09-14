@@ -160,6 +160,38 @@ class BleAcr1555uSdk {
     return _stripStatusWord(res);
   }
 
+  /// Present Password: comando proprietario ST (ISO15693 Custom Command 0xB3, manufacturer
+  /// code ST 0x02), inviato tramite il Pass-Through Command ISO15693 `FF FB ..` (§5.5.4.2).
+  /// Stesso comando usato da `TagManager.presentPassword` via NFC telefono (ST25 SDK
+  /// `ST25DVTag.presentPassword`), necessario per sbloccare la lettura dell'area di
+  /// configurazione protetta (es. password #2 per l'area 0x0000-0x03FF).
+  ///
+  /// Lo ST25 SDK, per questo comando, usa sempre modalità "addressed" (Flags=0x22) con
+  /// l'UID del tag esplicito nel payload (verificato via decompilazione di
+  /// `Iso15693CustomCommand.presentPwd`/`Iso15693Command` in st25sdk-1.11.0.jar: il flag
+  /// di default è 0x22 e `uidNeeded(0x22)` è true). Il pass-through del reader (Flags=0x00)
+  /// dovrebbe fare da sé l'indirizzamento, ma per i comandi custom (A0h-DFh) il manuale
+  /// ACR1555U li marca esplicitamente come "N/A - da validare": costruiamo quindi il
+  /// frame indirizzato esplicito (Flags=0x22 + UID) per allinearci al comportamento noto
+  /// e funzionante via NFC telefono, passando l'UID così come restituito da [getUid]
+  /// (già in ordine di trasmissione ISO15693, LSB per primo).
+  static Future<void> presentPassword(int passwordNumber, Uint8List password, {Uint8List? uid}) async {
+    if (password.length != 8) {
+      throw ArgumentError('password deve essere di 8 byte (16 cifre hex)');
+    }
+    final int flags = uid != null ? 0x22 : 0x00;
+    final data = Uint8List.fromList([
+      0xB3, // Command Code: Present Password (custom ST)
+      0x02, // Manufacturer Code: ST
+      if (uid != null) ...uid,
+      passwordNumber & 0xFF,
+      ...password,
+    ]);
+    final apdu = Uint8List.fromList([0xFF, 0xFB, 0x00, flags, data.length & 0xFF, ...data]);
+    final res = await transceiveApdu(apdu);
+    _stripStatusWord(res);
+  }
+
   /// Rimuove gli ultimi 2 byte di status word (SW1 SW2) da una risposta APDU PC/SC,
   /// verificando che sia 90 00 (successo). Solleva [BleReaderException] altrimenti.
   static Uint8List _stripStatusWord(Uint8List response) {
