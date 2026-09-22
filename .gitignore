@@ -1,0 +1,22 @@
+# Dart and Flutter generated files
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub/
+build/
+coverage/
+pubspec.lock
+
+# IDE and OS files
+.idea/
+*.iml
+.DS_Store
+
+# Android/Gradle generated files
+android/.gradle/
+android/build/
+android/local.properties
+
+# Local sample application kept outside the published package
+/untitled/

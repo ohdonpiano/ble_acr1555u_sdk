@@ -40,7 +40,7 @@ import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 
 /**
- * Plugin Android per il reader BLE+NFC USR/ACS ACR1555U (PoC integrazione g2misuratori).
+ * Plugin Android per il reader BLE+NFC USR/ACS ACR1555U.
  * <p>
  * Espone via MethodChannel "ble_acr1555u_sdk":
  * - isBleSupported, startScan, stopScan, connect, disconnect
@@ -854,4 +854,3 @@ public class BleAcr1555uSdkPlugin implements FlutterPlugin, MethodChannel.Method
 
     private MethodChannel.Result pendingBatteryResult;
 }
-

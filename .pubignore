@@ -1,0 +1,11 @@
+# Local development and generated files
+.dart_tool/
+.idea/
+.git/
+.gitignore
+android/.gradle/
+android/build/
+android/local.properties
+build/
+coverage/
+untitled/
