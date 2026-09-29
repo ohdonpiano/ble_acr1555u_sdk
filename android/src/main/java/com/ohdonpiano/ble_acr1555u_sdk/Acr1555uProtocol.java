@@ -180,13 +180,16 @@ final class Acr1555uProtocol {
         final int hostSeq;
         final int readerSeq;
         final byte[] datablock;
+        final int frameLength;
 
-        DecodedFrame(int slot, int mutualAuth, int hostSeq, int readerSeq, byte[] datablock) {
+        DecodedFrame(int slot, int mutualAuth, int hostSeq, int readerSeq,
+                     byte[] datablock, int frameLength) {
             this.slot = slot;
             this.mutualAuth = mutualAuth;
             this.hostSeq = hostSeq;
             this.readerSeq = readerSeq;
             this.datablock = datablock;
+            this.frameLength = frameLength;
         }
     }
 
@@ -204,37 +207,45 @@ final class Acr1555uProtocol {
         // Len è big-endian (MSB first): verificato sui frame di risposta reali del reader
         // (es. byte[2..3]="00 0A" -> len=10), non little-endian come assunto inizialmente.
         int len = ((buffer[2] & 0xFF) << 8) | (buffer[3] & 0xFF);
-        int totalLen = 1 /*start*/ + 6 /*slot+len+auth+hostSeq+readerSeq*/ + len + 1 /*checksum*/ + 1 /*stop*/;
+        int declaredFrameLength = 1 + 6 + len + 1 + 1;
+        int totalLen = declaredFrameLength;
         if (buffer.length < totalLen) {
-            return null; // frame incompleto, attendere altri pacchetti di notifica
-        }
-        int stopByte = buffer[totalLen - 1] & 0xFF;
-        if (stopByte != STOP_BYTE) {
-            throw new IllegalArgumentException("Stop byte non valido: 0x" + Integer.toHexString(stopByte));
-        }
-        int checksum = 0;
-        for (int i = 1; i < totalLen - 2; i++) {
-            checksum ^= (buffer[i] & 0xFF);
-        }
-        int expectedChecksum = buffer[totalLen - 2] & 0xFF;
-        if (checksum != expectedChecksum) {
-            throw new IllegalArgumentException("Checksum non valido: atteso 0x" + Integer.toHexString(expectedChecksum)
-                    + " calcolato 0x" + Integer.toHexString(checksum));
+            // Some ACR1555U firmware versions split a large CCID response into
+            // multiple BLE frames. Each fragment repeats the BLE header and has
+            // its own checksum/stop byte, while Len remains the full CCID length.
+            totalLen = findValidShortFrameLength(buffer);
+            if (totalLen < 0) return null;
+        } else if ((buffer[totalLen - 1] & 0xFF) != STOP_BYTE
+                || !hasValidChecksum(buffer, totalLen)) {
+            totalLen = findValidShortFrameLength(buffer);
+            if (totalLen < 0) {
+                throw new IllegalArgumentException("Frame BLE malformato");
+            }
         }
         int slot = buffer[1] & 0xFF;
         int mutualAuth = buffer[4] & 0xFF;
         int hostSeq = buffer[5] & 0xFF;
         int readerSeq = buffer[6] & 0xFF;
-        byte[] datablock = new byte[len];
-        System.arraycopy(buffer, 7, datablock, 0, len);
-        return new DecodedFrame(slot, mutualAuth, hostSeq, readerSeq, datablock);
+        int dataLength = totalLen - 9;
+        byte[] datablock = new byte[dataLength];
+        System.arraycopy(buffer, 7, datablock, 0, dataLength);
+        return new DecodedFrame(slot, mutualAuth, hostSeq, readerSeq, datablock, totalLen);
     }
 
-    static int frameTotalLength(byte[] buffer) {
-        if (buffer.length < 4) return -1;
-        // Len è big-endian (MSB first), vedi tryDecodeFrame.
-        int len = ((buffer[2] & 0xFF) << 8) | (buffer[3] & 0xFF);
-        return 1 + 6 + len + 1 + 1;
+    private static boolean hasValidChecksum(byte[] buffer, int frameLength) {
+        if (frameLength < 9 || (buffer[frameLength - 1] & 0xFF) != STOP_BYTE) return false;
+        int checksum = 0;
+        for (int i = 1; i < frameLength - 2; i++) checksum ^= (buffer[i] & 0xFF);
+        return checksum == (buffer[frameLength - 2] & 0xFF);
+    }
+
+    private static int findValidShortFrameLength(byte[] buffer) {
+        for (int i = 8; i < buffer.length; i++) {
+            if ((buffer[i] & 0xFF) != STOP_BYTE) continue;
+            int candidateLength = i + 1;
+            if (hasValidChecksum(buffer, candidateLength)) return candidateLength;
+        }
+        return -1;
     }
 
     // ---- Costruttori pseudo-APDU PC/SC (§5.5.3) usati da XfrBlock ----
@@ -244,12 +255,24 @@ final class Acr1555uProtocol {
         return new byte[]{(byte) 0xFF, (byte) 0xCA, 0x00, 0x00, 0x00};
     }
 
-    /** FF B0 00 [address] [length] -> Read Binary Blocks (length 0x00 = 256 byte). */
+    /**
+     * FF B0 [mode/address MSB] [address LSB] [length] -> Read Binary Blocks.
+     * ISO15693 uses the low nibble of P1 plus P2 for its 11-bit block address.
+     */
     static byte[] apduReadBinary(int address, int length) {
-        if (address < 0 || address > 0xFF) {
-            throw new IllegalArgumentException("address must fit in P2 (0-255); usare readBinaryExtended per range maggiori se necessario");
+        if (address < 0 || address > 0x7FF) {
+            throw new IllegalArgumentException("address must fit in 11-bit ISO15693 range (0-2047)");
         }
-        return new byte[]{(byte) 0xFF, (byte) 0xB0, 0x00, (byte) (address & 0xFF), (byte) (length & 0xFF)};
+        if (length < 0 || length > 256) {
+            throw new IllegalArgumentException("length must be between 0 and 256 bytes");
+        }
+        return new byte[]{
+                (byte) 0xFF,
+                (byte) 0xB0,
+                (byte) ((address >> 8) & 0x0F),
+                (byte) (address & 0xFF),
+                (byte) (length == 256 ? 0 : length)
+        };
     }
 
     /** FF D6 00 [address] [Lc] [data] -> Update Binary Blocks. */

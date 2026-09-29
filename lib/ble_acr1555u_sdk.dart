@@ -164,16 +164,69 @@ class BleAcr1555uSdk {
     return _stripStatusWord(res);
   }
 
-  /// FF B0 00 [address] [length] -> Read Binary Blocks (length 0x00 = 256 byte).
+  /// FF B0 [mode/address MSB] [address LSB] [length] -> Read Binary Blocks.
+  ///
+  /// For ISO15693 the reader encodes the 11-bit block address across the low
+  /// nibble of P1 and all of P2. A length of 0 means 256 bytes.
   static Future<Uint8List> readBinary(int address, int length) async {
-    if (address < 0 || address > 0xFF) {
+    if (address < 0 || address > 0x7FF) {
       throw ArgumentError(
-          'address deve essere compreso tra 0 e 255 (P2 a 1 byte)');
+          'address deve essere compreso tra 0 e 2047 (indirizzo ISO15693 a 11 bit)');
+    }
+    if (length < 0 || length > 256) {
+      throw ArgumentError('length deve essere compreso tra 0 e 256 byte');
     }
     final res = await transceiveApdu(
-      Uint8List.fromList([0xFF, 0xB0, 0x00, address & 0xFF, length & 0xFF]),
+      Uint8List.fromList([
+        0xFF,
+        0xB0,
+        (address >> 8) & 0x0F,
+        address & 0xFF,
+        length == 256 ? 0 : length,
+      ]),
     );
     return _stripStatusWord(res);
+  }
+
+  /// Extended ISO15693 Read Multiple Blocks (0x33), in chunks suitable for the
+  /// ACR1555U APDU/ATT limits. [blockCount] is encoded as N-1 as required by
+  /// ISO15693, and each block is four bytes for the G2 tag.
+  static Future<Uint8List> extendedReadBlocks(
+    int firstBlock,
+    int blockCount, {
+    Uint8List? uid,
+  }) async {
+    if (firstBlock < 0 || firstBlock > 0xFFFFFF) {
+      throw ArgumentError('firstBlock fuori dal range ISO15693 esteso');
+    }
+    if (blockCount <= 0 || blockCount > 64) {
+      throw ArgumentError('blockCount deve essere compreso tra 1 e 64');
+    }
+    if (uid != null && uid.length != 8) {
+      throw ArgumentError('uid deve essere lungo 8 byte');
+    }
+    final flags = uid == null ? 0x00 : 0x22;
+    final payload = <int>[
+      0x33,
+      if (uid != null) ...uid,
+      firstBlock & 0xFF,
+      (firstBlock >> 8) & 0xFF,
+      (firstBlock >> 16) & 0xFF,
+      (blockCount - 1) & 0xFF,
+      ((blockCount - 1) >> 8) & 0xFF,
+    ];
+    final apdu = Uint8List.fromList(
+      [0xFF, 0xFB, 0x00, flags, payload.length, ...payload],
+    );
+    final response = _stripStatusWord(await transceiveApdu(apdu));
+    final expectedLength = blockCount * 4;
+    if (response.length != expectedLength) {
+      throw BleReaderException(
+        'INVALID_LENGTH',
+        'lettura estesa incompleta: ${response.length}/$expectedLength byte',
+      );
+    }
+    return response;
   }
 
   /// Present Password: comando proprietario ST (ISO15693 Custom Command 0xB3, manufacturer

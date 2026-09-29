@@ -105,6 +105,7 @@ public class BleAcr1555uSdkPlugin implements FlutterPlugin, MethodChannel.Method
     private int lastReaderSeq = 0;
 
     private final java.io.ByteArrayOutputStream responseAccumulator = new java.io.ByteArrayOutputStream();
+    private final java.io.ByteArrayOutputStream ccidResponseAccumulator = new java.io.ByteArrayOutputStream();
 
     private final ArrayDeque<byte[]> writeQueue = new ArrayDeque<>();
     private boolean writeInFlight = false;
@@ -429,6 +430,7 @@ public class BleAcr1555uSdkPlugin implements FlutterPlugin, MethodChannel.Method
         seqCounter = 0;
         lastReaderSeq = 0;
         responseAccumulator.reset();
+        ccidResponseAccumulator.reset();
         writeQueue.clear();
         writeInFlight = false;
     }
@@ -752,7 +754,7 @@ public class BleAcr1555uSdkPlugin implements FlutterPlugin, MethodChannel.Method
                     return;
                 }
                 if (decoded == null) break; // frame incompleto, attendo altri byte
-                consumed += Acr1555uProtocol.frameTotalLength(remaining);
+                consumed += decoded.frameLength;
                 lastReaderSeq = decoded.readerSeq;
                 onFrameReceived(decoded);
             }
@@ -767,9 +769,11 @@ public class BleAcr1555uSdkPlugin implements FlutterPlugin, MethodChannel.Method
     private void onFrameReceived(Acr1555uProtocol.DecodedFrame frame) {
         Log.d(TAG, "onFrameReceived: slot=" + frame.slot + " hostSeq=" + frame.hostSeq
                 + " readerSeq=" + frame.readerSeq + " datablock=" + toHex(frame.datablock));
+        byte[] ccidMessage = accumulateCcidResponse(frame.datablock);
+        if (ccidMessage == null) return;
         Acr1555uProtocol.CcidResponse resp;
         try {
-            resp = Acr1555uProtocol.parseCcidMessage(frame.datablock);
+            resp = Acr1555uProtocol.parseCcidMessage(ccidMessage);
         } catch (Exception e) {
             Log.w(TAG, "Impossibile fare il parse del messaggio CCID: " + e.getMessage());
             return;
@@ -796,6 +800,38 @@ public class BleAcr1555uSdkPlugin implements FlutterPlugin, MethodChannel.Method
                 p.result.success(resp.data);
             }
         }
+    }
+
+    /**
+     * Large FF B0 responses can arrive as multiple BLE frames. The first
+     * fragment contains the CCID header and the following fragments contain
+     * only continuation bytes.
+     */
+    private byte[] accumulateCcidResponse(byte[] datablock) {
+        if (ccidResponseAccumulator.size() == 0) {
+            if (datablock.length < 10) {
+                Log.w(TAG, "Frammento CCID senza header, ignorato");
+                return null;
+            }
+            int dataLength = (datablock[1] & 0xFF)
+                    | ((datablock[2] & 0xFF) << 8)
+                    | ((datablock[3] & 0xFF) << 16)
+                    | ((datablock[4] & 0xFF) << 24);
+            int expectedLength = 10 + dataLength;
+            if (expectedLength <= datablock.length) return datablock;
+        }
+
+        ccidResponseAccumulator.write(datablock, 0, datablock.length);
+        byte[] accumulated = ccidResponseAccumulator.toByteArray();
+        if (accumulated.length < 10) return null;
+        int dataLength = (accumulated[1] & 0xFF)
+                | ((accumulated[2] & 0xFF) << 8)
+                | ((accumulated[3] & 0xFF) << 16)
+                | ((accumulated[4] & 0xFF) << 24);
+        int expectedLength = 10 + dataLength;
+        if (accumulated.length < expectedLength) return null;
+        ccidResponseAccumulator.reset();
+        return java.util.Arrays.copyOf(accumulated, expectedLength);
     }
 
     private void handleCardNotification(byte[] value) {
