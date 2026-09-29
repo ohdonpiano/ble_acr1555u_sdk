@@ -1,3 +1,9 @@
+## 0.3.0
+
+- Removed the ST25-specific `presentPassword` helper from the public API.
+- Applications can send vendor-specific commands through generic
+  `transceiveApdu`, keeping the BLE/CCID package reusable across tag families.
+
 ## 0.2.1
 
 - Fixed ISO15693 `FF B0` Read Binary address encoding for ACR1555U readers.

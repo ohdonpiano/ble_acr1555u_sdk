@@ -50,16 +50,17 @@ await subscription.cancel();
 ```
 
 `transceiveApdu` accepts a PC/SC pseudo-APDU and returns the raw response,
-including the status word. The convenience methods `getUid` and `readBinary`
-remove the status word and throw `BleReaderException` when the reader returns a
-non-success status.
+including the status word. Application-specific tag commands should be encoded
+by the consuming application and sent through this generic method. The
+convenience methods `getUid` and `readBinary` remove the status word and throw
+`BleReaderException` when the reader returns a non-success status.
 
 ## Limitations
 
 - Reader discovery filters the advertised name by the `ACR1555U` prefix.
 - The implementation relies on the ACR1555U BLE frame and CCID protocol.
-- `presentPassword` is specific to ST25 ISO15693 tags and the ST custom
-  command; it is not a general password API.
+- The package does not encode vendor-specific tag commands; use
+  `transceiveApdu` for application-specific PC/SC pass-through commands.
 - Hardware integration tests require a physical reader and tag.
 
 ## License
