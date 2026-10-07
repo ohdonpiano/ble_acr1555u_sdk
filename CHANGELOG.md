@@ -1,3 +1,11 @@
+## 0.4.0
+
+- Added the generic `writeBinary` helper for PC/SC `FF D6` Update Binary
+  commands, including 11-bit ISO15693 address validation, short-APDU length
+  validation, and `90 00` status-word checking.
+- Kept tag-vendor authentication, configuration, password, and GPO commands
+  outside this package; applications can encode them with `transceiveApdu`.
+
 ## 0.3.0
 
 - Removed the ST25-specific `presentPassword` helper from the public API.

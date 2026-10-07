@@ -52,8 +52,22 @@ await subscription.cancel();
 `transceiveApdu` accepts a PC/SC pseudo-APDU and returns the raw response,
 including the status word. Application-specific tag commands should be encoded
 by the consuming application and sent through this generic method. The
-convenience methods `getUid` and `readBinary` remove the status word and throw
-`BleReaderException` when the reader returns a non-success status.
+convenience methods `getUid`, `readBinary`, and `writeBinary` validate the
+`90 00` status word and throw `BleReaderException` on failure.
+
+`writeBinary` emits the generic PC/SC `FF D6` Update Binary command. For
+ISO15693, pass the first block address and one or more complete blocks (the
+application must know the tag's block size):
+
+```dart
+await BleAcr1555uSdk.writeBinary(
+  0x40,
+  Uint8List.fromList([0x01, 0x02, 0x03, 0x04]),
+);
+```
+
+The package intentionally does not expose ST25-specific password,
+configuration, or GPO helpers.
 
 ## Limitations
 

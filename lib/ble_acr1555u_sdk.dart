@@ -188,6 +188,33 @@ class BleAcr1555uSdk {
     return _stripStatusWord(res);
   }
 
+  /// FF D6 [mode/address MSB] [address LSB] [length] [data] -> Update
+  /// Binary Blocks.
+  ///
+  /// For ISO15693 [address] is the first block address. The caller is
+  /// responsible for supplying complete blocks of the size required by the
+  /// selected tag. A short APDU can carry at most 255 data bytes.
+  static Future<void> writeBinary(int address, Uint8List data) async {
+    if (address < 0 || address > 0x7FF) {
+      throw ArgumentError(
+          'address deve essere compreso tra 0 e 2047 (indirizzo ISO15693 a 11 bit)');
+    }
+    if (data.isEmpty || data.length > 255) {
+      throw ArgumentError('data deve contenere tra 1 e 255 byte');
+    }
+    final res = await transceiveApdu(
+      Uint8List.fromList([
+        0xFF,
+        0xD6,
+        (address >> 8) & 0x0F,
+        address & 0xFF,
+        data.length,
+        ...data,
+      ]),
+    );
+    _stripStatusWord(res);
+  }
+
   /// Extended ISO15693 Read Multiple Blocks (0x33), in chunks suitable for the
   /// ACR1555U APDU/ATT limits. [blockCount] is encoded as N-1 as required by
   /// ISO15693, and each block is four bytes for the G2 tag.
