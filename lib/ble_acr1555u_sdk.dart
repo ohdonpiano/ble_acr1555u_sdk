@@ -256,6 +256,133 @@ class BleAcr1555uSdk {
     return response;
   }
 
+  /// Reads ISO15693 blocks through PC/SC 2.0 Part 3 Transparent Exchange.
+  ///
+  /// Unlike FF B0, this sends the native ISO15693 command to the tag and
+  /// therefore does not apply the reader's Read Binary address restrictions.
+  static Future<Uint8List> transparentReadBlocks(int firstBlock, int blockCount,
+      {Uint8List? uid}) async {
+    if (firstBlock < 0 || firstBlock > 0xFFFFFF) {
+      throw ArgumentError('firstBlock fuori dal range ISO15693 esteso');
+    }
+    if (blockCount <= 0 || blockCount > 64) {
+      throw ArgumentError('blockCount deve essere compreso tra 1 e 64');
+    }
+
+    final tagUid = uid ?? await getUid();
+    if (tagUid.length != 8) {
+      throw ArgumentError('uid deve essere lungo 8 byte');
+    }
+    final command = Uint8List.fromList([
+      0x22, // addressed, high data rate, one subcarrier
+      0x33, // Extended Read Multiple Blocks
+      ...tagUid,
+      firstBlock & 0xFF,
+      (firstBlock >> 8) & 0xFF,
+      (blockCount - 1) & 0xFF,
+      ((blockCount - 1) >> 8) & 0xFF,
+    ]);
+    final response = await _transparentExchangeSession(command);
+    final expectedLength = blockCount * 4;
+    if (response.length != expectedLength) {
+      throw BleReaderException(
+        'INVALID_LENGTH',
+        'lettura trasparente incompleta: ${response.length}/$expectedLength byte',
+      );
+    }
+    return response;
+  }
+
+  /// Builds the FF C2 Transparent Exchange APDU for a native tag command.
+  static Uint8List buildTransparentExchangeApdu(Uint8List command) {
+    if (command.isEmpty || command.length > 255) {
+      throw ArgumentError('il comando trasparente deve contenere 1-255 byte');
+    }
+    return Uint8List.fromList([
+      0xFF,
+      0xC2,
+      0x00,
+      0x01,
+      command.length + 2,
+      0x95,
+      command.length,
+      ...command,
+    ]);
+  }
+
+  static Future<Uint8List> _transparentExchangeSession(
+    Uint8List command,
+  ) async {
+    await transceiveApdu(Uint8List.fromList(
+      [0xFF, 0xC2, 0x00, 0x00, 0x02, 0x81, 0x00],
+    ));
+    try {
+      await transceiveApdu(Uint8List.fromList(
+        [0xFF, 0xC2, 0x00, 0x02, 0x04, 0x8F, 0x02, 0x02, 0x03, 0x00],
+      ));
+      final response = _stripStatusWord(
+        await transceiveApdu(buildTransparentExchangeApdu(command)),
+      );
+      return parseTransparentResponse(response);
+    } finally {
+      await transceiveApdu(Uint8List.fromList(
+        [0xFF, 0xC2, 0x00, 0x00, 0x02, 0x82, 0x00],
+      ));
+    }
+  }
+
+  static Uint8List parseTransparentResponse(Uint8List response) {
+    var index = 0;
+    Uint8List? data;
+    while (index < response.length) {
+      final tag = response[index++];
+      if (index >= response.length) {
+        throw BleReaderException(
+            'INVALID_RESPONSE', 'TLV trasparente troncato');
+      }
+      final lengthByte = response[index++];
+      final int length;
+      if (lengthByte == 0x81) {
+        if (index >= response.length) {
+          throw BleReaderException(
+              'INVALID_RESPONSE', 'lunghezza TLV trasparente troncata');
+        }
+        length = 0x100 + response[index];
+        index++;
+      } else {
+        length = lengthByte;
+      }
+      if (index + length > response.length) {
+        throw BleReaderException(
+            'INVALID_RESPONSE', 'TLV trasparente non valido');
+      }
+      final value = response.sublist(index, index + length);
+      index += length;
+      if (tag == 0xC0 && (value.length != 3 || value[0] != 0x00)) {
+        throw BleReaderException(
+            'TRANSPARENT_ERROR', 'errore generico del reader');
+      }
+      if (tag == 0x96 &&
+          (value.length != 2 || value[0] != 0x00 || value[1] != 0x00)) {
+        throw BleReaderException(
+            'TRANSPARENT_ERROR', 'errore di risposta ISO15693');
+      }
+      if (tag == 0x97) {
+        if (value.isEmpty || value[0] != 0x00) {
+          throw BleReaderException(
+            'TRANSPARENT_ERROR',
+            'il tag ha restituito un errore ISO15693',
+          );
+        }
+        data = value.sublist(1);
+      }
+    }
+    if (data == null) {
+      throw BleReaderException('INVALID_RESPONSE', 'dati ISO15693 assenti');
+    }
+    return data;
+  }
+
   /// Rimuove gli ultimi 2 byte di status word (SW1 SW2) da una risposta APDU PC/SC,
   /// verificando che sia 90 00 (successo). Solleva [BleReaderException] altrimenti.
   static Uint8List _stripStatusWord(Uint8List response) {
