@@ -456,7 +456,7 @@ class BleAcr1555uSdk {
     await startTransparentSession();
     try {
       await switchTransparentProtocol(highDataRate: true);
-      return _transparentExchange(command);
+      return await _transparentExchange(command);
     } finally {
       await endTransparentSession();
     }

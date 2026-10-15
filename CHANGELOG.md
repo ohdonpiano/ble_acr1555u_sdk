@@ -1,3 +1,14 @@
+## 0.5.0
+
+- Added persistent ACR1555U transparent-session support for ISO15693 reads,
+  including Manage Session and Switch Protocol handling.
+- Added addressed, high-data-rate ST25DV authentication and extended
+  multi-block reads through `FF C2` Transparent Exchange.
+- Fixed parsing of ACR1555U extended response lengths for both 256-byte reads
+  and shorter final responses.
+- Added protocol documentation and regression coverage for BLE/CCID framing,
+  ST25DV commands, and transparent-response parsing.
+
 ## 0.4.0
 
 - Added the generic `writeBinary` helper for PC/SC `FF D6` Update Binary
