@@ -481,12 +481,21 @@ class BleAcr1555uSdk {
       final lengthByte = response[index++];
       final int length;
       if (lengthByte == 0x81) {
-        if (index + 1 >= response.length) {
+        if (index >= response.length) {
           throw BleReaderException(
               'INVALID_RESPONSE', 'lunghezza TLV trasparente troncata');
         }
-        length = response[index] | (response[index + 1] << 8);
-        index += 2;
+        final extendedLength = response[index++];
+        if (extendedLength == 0x01 &&
+            index < response.length &&
+            response[index] == 0x00) {
+          // ACR encodes the 257-byte reply (flags + 256 data bytes) as
+          // 97 81 01 00, leaving the response flag as the first value byte.
+          length = 0x101;
+        } else {
+          // For shorter replies, 97 81 xx is followed by the value bytes.
+          length = extendedLength;
+        }
       } else {
         length = lengthByte;
       }

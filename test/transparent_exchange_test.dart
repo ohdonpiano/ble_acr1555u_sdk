@@ -172,6 +172,31 @@ void main() {
     );
   });
 
+  test('parses the final shorter extended response data object', () {
+    final data = List<int>.filled(180, 0xA5);
+    final response = Uint8List.fromList([
+      0xC0,
+      0x03,
+      0x00,
+      0x90,
+      0x00,
+      0x92,
+      0x01,
+      0x00,
+      0x96,
+      0x02,
+      0x00,
+      0x00,
+      0x97,
+      0x81,
+      0xB5,
+      0x00,
+      ...data,
+    ]);
+
+    expect(BleAcr1555uSdk.parseTransparentResponse(response), data);
+  });
+
   test('reports the ISO15693 response error code', () {
     expect(
       () => BleAcr1555uSdk.parseTransparentResponse(

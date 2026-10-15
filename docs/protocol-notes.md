@@ -32,6 +32,14 @@ The same reference manual documents the following Transparent Exchange TLVs:
 - `96`: reader transceive status;
 - `97`: bytes received from the tag.
 
+On the ACR1555U firmware tested with the ST25DV reader, a `97` response
+larger than 127 bytes uses the proprietary `81` length marker. Shorter
+responses use `97 81 xx` followed by the value, so the final 45-block read is
+encoded as `97 81 B5 00 [180 data bytes]` (the leading `00` is the ISO15693
+response flag). The 256-byte read is a special 257-byte payload containing the
+response flag and 256 data bytes, encoded as `97 81 01 00 [256 data bytes]`.
+This is the observed ACR1555U framing, not a generic BER-TLV interpretation.
+
 The package does not add ISO15693 CRC bytes to commands passed through
 Transparent Exchange. CRC/parity handling is delegated to the reader
 configuration described by the ACR1555U manual.
