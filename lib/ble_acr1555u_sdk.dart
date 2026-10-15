@@ -293,6 +293,105 @@ class BleAcr1555uSdk {
     return response;
   }
 
+  /// Starts a transparent exchange session and disables reader auto-polling.
+  ///
+  /// The session remains active until [endTransparentSession] is called. This
+  /// is useful when several commands must share the same PICC authentication
+  /// state.
+  static Future<void> startTransparentSession() async {
+    _stripStatusWord(await transceiveApdu(buildManageSessionApdu(0x81)));
+  }
+
+  /// Ends a transparent exchange session and restores the reader polling state.
+  static Future<void> endTransparentSession() async {
+    _stripStatusWord(await transceiveApdu(buildManageSessionApdu(0x82)));
+  }
+
+  /// Switches the ISO15693 baud rate used by the transparent session.
+  ///
+  /// `FF FB` pass-through commands are limited to 26 kbps by the reader,
+  /// whereas the native extended read uses 53 kbps.
+  static Future<void> switchTransparentProtocol({
+    required bool highDataRate,
+  }) async {
+    _stripStatusWord(
+      await transceiveApdu(
+        buildSwitchProtocolApdu(highDataRate: highDataRate),
+      ),
+    );
+  }
+
+  /// Reads blocks using an already-started transparent session.
+  static Future<Uint8List> transparentReadBlocksInSession(
+    int firstBlock,
+    int blockCount, {
+    Uint8List? uid,
+  }) async {
+    if (firstBlock < 0 || firstBlock > 0xFFFFFF) {
+      throw ArgumentError('firstBlock fuori dal range ISO15693 esteso');
+    }
+    if (blockCount <= 0 || blockCount > 64) {
+      throw ArgumentError('blockCount deve essere compreso tra 1 e 64');
+    }
+
+    final tagUid = uid ?? await getUid();
+    if (tagUid.length != 8) {
+      throw ArgumentError('uid deve essere lungo 8 byte');
+    }
+    final command = Uint8List.fromList([
+      0x22,
+      0x33,
+      ...tagUid,
+      firstBlock & 0xFF,
+      (firstBlock >> 8) & 0xFF,
+      (blockCount - 1) & 0xFF,
+      ((blockCount - 1) >> 8) & 0xFF,
+    ]);
+    final response = await _transparentExchange(command);
+    final expectedLength = blockCount * 4;
+    if (response.length != expectedLength) {
+      throw BleReaderException(
+        'INVALID_LENGTH',
+        'lettura trasparente incompleta: ${response.length}/$expectedLength byte',
+      );
+    }
+    return response;
+  }
+
+  /// Sends a native ISO15693 command through an already-started session.
+  ///
+  /// The command must include the ISO15693 request flags as its first byte.
+  /// The returned value is the native response payload without the response
+  /// flags byte; ISO15693 error responses are reported as [BleReaderException].
+  static Future<Uint8List> transparentExchangeInSession(
+    Uint8List command,
+  ) async {
+    if (command.length < 2 || command.length > 255) {
+      throw ArgumentError('il comando trasparente deve contenere 2-255 byte');
+    }
+    return _transparentExchange(command);
+  }
+
+  /// Builds an addressed ST25 custom command with high data rate enabled.
+  ///
+  /// ST25 places its manufacturer code after the custom command code.
+  static Uint8List buildAddressedSt25Command(
+    int command,
+    Uint8List uid,
+    Uint8List payload,
+  ) {
+    if (command < 0 || command > 0xFF) {
+      throw ArgumentError('codice comando ISO15693 non valido');
+    }
+    if (uid.length != 8) {
+      throw ArgumentError('uid deve essere lungo 8 byte');
+    }
+    if (payload.length > 244) {
+      throw ArgumentError('payload ISO15693 troppo lungo');
+    }
+    return Uint8List.fromList([0x22, command, 0x02, ...uid, ...payload]);
+  }
+
   /// Builds the FF C2 Transparent Exchange APDU for a native tag command.
   static Uint8List buildTransparentExchangeApdu(Uint8List command) {
     if (command.isEmpty || command.length > 255) {
@@ -310,25 +409,64 @@ class BleAcr1555uSdk {
     ]);
   }
 
+  /// Builds a Manage Session APDU for Start (`81`) or End (`82`).
+  static Uint8List buildManageSessionApdu(int command) {
+    if (command != 0x81 && command != 0x82) {
+      throw ArgumentError('comando Manage Session non valido');
+    }
+    return Uint8List.fromList([
+      0xFF,
+      0xC2,
+      0x00,
+      0x00,
+      0x02,
+      command,
+      0x00,
+    ]);
+  }
+
+  /// Builds the ISO15693 Switch Protocol APDU with an explicit baud rate.
+  static Uint8List buildSwitchProtocolApdu({
+    required bool highDataRate,
+  }) {
+    final baud = highDataRate ? 0x08 : 0x80;
+    return Uint8List.fromList([
+      0xFF,
+      0xC2,
+      0x00,
+      0x02,
+      0x0A,
+      0xFF,
+      0x6E,
+      0x03,
+      0x05,
+      0x01,
+      baud,
+      0x8F,
+      0x02,
+      0x02,
+      0x03,
+      0x00,
+    ]);
+  }
+
   static Future<Uint8List> _transparentExchangeSession(
     Uint8List command,
   ) async {
-    await transceiveApdu(Uint8List.fromList(
-      [0xFF, 0xC2, 0x00, 0x00, 0x02, 0x81, 0x00],
-    ));
+    await startTransparentSession();
     try {
-      await transceiveApdu(Uint8List.fromList(
-        [0xFF, 0xC2, 0x00, 0x02, 0x04, 0x8F, 0x02, 0x02, 0x03, 0x00],
-      ));
-      final response = _stripStatusWord(
-        await transceiveApdu(buildTransparentExchangeApdu(command)),
-      );
-      return parseTransparentResponse(response);
+      await switchTransparentProtocol(highDataRate: true);
+      return _transparentExchange(command);
     } finally {
-      await transceiveApdu(Uint8List.fromList(
-        [0xFF, 0xC2, 0x00, 0x00, 0x02, 0x82, 0x00],
-      ));
+      await endTransparentSession();
     }
+  }
+
+  static Future<Uint8List> _transparentExchange(Uint8List command) async {
+    final response = _stripStatusWord(
+      await transceiveApdu(buildTransparentExchangeApdu(command)),
+    );
+    return parseTransparentResponse(response);
   }
 
   static Uint8List parseTransparentResponse(Uint8List response) {
@@ -343,12 +481,12 @@ class BleAcr1555uSdk {
       final lengthByte = response[index++];
       final int length;
       if (lengthByte == 0x81) {
-        if (index >= response.length) {
+        if (index + 1 >= response.length) {
           throw BleReaderException(
               'INVALID_RESPONSE', 'lunghezza TLV trasparente troncata');
         }
-        length = 0x100 + response[index];
-        index++;
+        length = response[index] | (response[index + 1] << 8);
+        index += 2;
       } else {
         length = lengthByte;
       }
@@ -369,9 +507,16 @@ class BleAcr1555uSdk {
       }
       if (tag == 0x97) {
         if (value.isEmpty || value[0] != 0x00) {
+          final responseFlag = value.isEmpty
+              ? 'missing'
+              : '0x${value[0].toRadixString(16).padLeft(2, '0')}';
+          final errorCode = value.length < 2
+              ? 'missing'
+              : '0x${value[1].toRadixString(16).padLeft(2, '0')}';
           throw BleReaderException(
             'TRANSPARENT_ERROR',
-            'il tag ha restituito un errore ISO15693',
+            'il tag ha restituito un errore ISO15693 '
+                '(flag=$responseFlag, error=$errorCode)',
           );
         }
         data = value.sublist(1);

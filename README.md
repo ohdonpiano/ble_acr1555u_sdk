@@ -69,6 +69,10 @@ await BleAcr1555uSdk.writeBinary(
 The package intentionally does not expose ST25-specific password,
 configuration, or GPO helpers.
 
+Protocol details and source references for the ACR1555U Transparent Exchange
+and the raw ST25 command framing are documented in
+[`docs/protocol-notes.md`](docs/protocol-notes.md).
+
 ## Limitations
 
 - Reader discovery filters the advertised name by the `ACR1555U` prefix.
